@@ -1,0 +1,127 @@
+---
+title: "Prediction Assignment for Practicle Machine Learning Class"
+author: "Mitta Suresh"
+date: "Thursday, June 18, 2015"
+output: html_document
+---
+
+##Executive Summary:    
+Few machinlearning algorithm was applied to the given data to come up with prediction model. The best one is adopted as the final solution. The training data set provided was explored and refined before applying the machine learning algoritms. Based on project background it is evident that linear models don't work well for this type of problems. Cluster  algorithms would work the best. In my case Random Forest provided the best results. The out of bag error rate for the final model is 1.68%. Additionally when a test was run on the validation data it showed an accuracy of 99%.
+
+
+
+
+## Data Clean up and Tidy Data:
+The training data had 159 predictor variables. Some of them were wrongly classified as factor variables when they should be numeric. I also noted that the very first one was just a straight index of row numbers (which will add nothing meaningful to the analysis). In addition vast number of predictor variables had very little data, over 90% of the values in this group were NAs. A robust Model cannot be developed with predictors with mostly missing data, consequently they should be removed from analysis (this is similar to nzv, near zero variables).
+
+```{r echo=TRUE}
+# Load Data files
+testing=read.csv("C:/Users/Suresh/Documents/r/data/pml-testing.csv")
+training=read.csv("C:/Users/Suresh/Documents/r/data/pml-training.csv")
+library(caret)
+```
+
+
+Following steps were taken to clean up:   
+1. Convert factor variables to numeric for certain columns   
+2. Identify all variables with over 90% NAs   
+3. Reduce the number of variables for analysis   
+
+```{r warning=FALSE}
+# Convert some wrongly labelled factor variables to numeric class, Identified list is saved as an a
+load("C:/Users/Suresh/Documents/r/data/convertCols.rda")
+for (i in 1:length(convertCols)){
+        training[,convertCols[i]]=as.numeric(as.character(training[,convertCols[i]]))
+}
+# Identify all the columns which have excessive missing data
+naCols=NULL
+for (i in 1:ncol(training)){
+        if (sum(is.na(training[,i])) > 0.9*nrow(training)) {naCols=c(naCols,i)}
+}
+#remove mostly NA columnar data and col1 which is just a serial number
+newtrain=training[,-c(1,naCols)]
+# split the traing data for model creation and validation
+inTrain=createDataPartition(y=newtrain$classe,p=0.6,list=F)
+nttrain=newtrain[inTrain,]
+nttest=newtrain[-inTrain,]
+```
+
+
+
+## Expolatory Data Analysis
+
+Due to the large number of predictor variables and also large number of rows which ends up taking lot of processing time. I choose to explore the running models on a sub set of data. I chose 10% of data (playtrain) to understand the general model fits to speed up the process.    
+
+```{r}
+# select small slice of data to play around
+set.seed(1000)
+inTrain=createDataPartition(y=newtrain$classe,p=0.1,list=FALSE)
+playtrain=newtrain[inTrain,]
+inTest=createDataPartition(y=newtrain$classe,p=0.1,list=FALSE)
+playtest=newtrain[inTest,]
+```
+
+I ran various models to fit as part of exploratory analysis. They included classification trees, bagging, boosting, Naive Bayes and Random Forest. The accuract I got was 48.8%, 71%,93%, 69.3% and 98.5% respectively. As sample of a dendogram generated from one the analysis is presented here.
+```{r eval=FALSE, echo=FALSE }
+fitrpart=train(classe~.,method="rpart",data=nttrain[,-c(1:5)])
+fitbag=train(classe~.,method="bagFDA",data=playtrain[,-c(1:5)])
+fitgbm=train(classe~.,method="gbm",data=playtrain[,-c(1:5),],verbose=FALSE)
+fitnb=train(classe~.,method="nb",data=playtrain[,-c(1:5),])
+CMrpart=confusionMatrix(playtest$classe,predict(fitrpart,playtest))
+CMbag=confusionMatrix(playtest$classe,predict(fitbag,playtest))
+CMgbm=confusionMatrix(playtest$classe,predict(fitgbm,playtest))
+CMnb=confusionMatrix(playtest$classe,predict(fitnb,playtest))
+
+```
+
+```{r echo=FALSE}
+load("C:/Users/Suresh/Documents/r/data/fitrpart.rda")
+library(rattle)
+fancyRpartPlot(fitrpart$finalModel,main="Tree Plot")
+```
+
+For more in depth exploring of Random Forest, I ran playtrain data will all the sensor predictors. Then using the varImp function I looked at the most importnt variables. Fitted another model using random forest method but limiting the number of variables to the top 10 predictors based or varImp function output.   
+
+```{r eval=FALSE}
+playfitRF=train(classe~.,method="rf",data=playtrain)
+save(playfitRF,file="playfitRF.rda")
+```
+```{r echo=TRUE}
+# to avoid time loading the model that was previously created
+load("C:/Users/Suresh/Documents/r/data/playfitRF.rda")
+varImp(playfitRF)
+
+```
+Following the analysis of the variables from varImp function. 10 Predictors were selected. Pairs plot of these variables are plotted.
+```{r echo=FALSE}
+# code for plotting the specific functions
+plotrain=createDataPartition(y=playtrain$classe,p=0.1,list=F)
+plottrain=playtrain[plotrain,]
+plot(plottrain[,c(6,7,8,15,32,58)],main="Pairs Plot 1")
+plot(plottrain[,c(42,43,44,45,46,58)],main="Pairs Plot 2")
+```
+
+
+## Final Model Fitting
+Based on exploratory data analysis, a model was fit to the training (nttrain) data, using the identified variables for a rondom foreset method.
+
+```{r eval=FALSE}
+fitsens10RF=train(classe~roll_belt+pitch_forearm+magnet_dumbbell_y+magnet_dumbbell_z+yaw_belt+pitch_belt+roll_dumbbell+magnet_dumbbell_x+accel_belt_z+roll_forearm,method="rf",data=nttrain)
+```
+```{r echo=FALSE}
+# to avoid processing time a previously calculated model is loaded
+load("C:/Users/Suresh/Documents/r/data/fitsens10RF.rda")
+fitsens10RF$finalModel
+```
+
+This resulted in a model with an out of Bag (OOB) error of 1.68%
+
+Using predict function predicted values for the testing data (nttest) was calculated. This was then compared with real values to generate Confusion matrix. The results showed an accuracy of
+
+```{r, echo=TRUE}
+#check effectiveness of the model - Validation
+confusionMatrix(nttest$classe,predict(fitsens10RF,nttest))
+```
+
+## Conclusion   
+The results show that the model created with 10 predictors using random foreset is highly accurate. The Sensitivity, Specificity, PPV (Positive Predictive Value) and NPV (Negative Predictive value) are all very high. Additionallly the accuracy between classes is also well balanced indicating there is no need to adjust the weighting of any class.
